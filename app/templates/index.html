@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MedFlow — Вхід у систему</title>
+    <link rel="stylesheet" href="/static/style.css?v=13">
+</head>
+<body>
+<div class="container">
+    <header>
+        <h1><a href="/" class="logo-link">MedFlow</a></h1>
+        <p>Вхід, реєстрація та доступ до особистого кабінету</p>
+    </header>
+
+    <main>
+        <div class="card auth-card">
+            <h2>Вхід у систему</h2>
+            <p class="muted">Увійдіть у свій акаунт або створіть новий профіль пацієнта чи лікаря.</p>
+
+            <div class="auth-tabs">
+                <button onclick="showAuthTab('login')">Вхід</button>
+                <button onclick="showAuthTab('patient')">Реєстрація пацієнта</button>
+                <button onclick="showAuthTab('doctor')">Реєстрація лікаря</button>
+            </div>
+
+            <div id="login-tab" class="auth-block">
+                <input id="login-email" placeholder="Email">
+                <input id="login-password" type="password" placeholder="Пароль">
+                <button onclick="loginUser()">Увійти</button>
+            </div>
+
+            <div id="patient-tab" class="auth-block" style="display:none;">
+                <input id="patient-full-name" placeholder="ПІБ">
+                <input id="patient-email" placeholder="Email">
+                <input id="patient-password" type="password" placeholder="Пароль">
+                <input id="patient-age" type="number" placeholder="Вік">
+                <input id="patient-phone-register" placeholder="Телефон">
+                <button onclick="registerPatient()">Зареєструвати пацієнта</button>
+            </div>
+
+            <div id="doctor-tab" class="auth-block" style="display:none;">
+                <input id="doctor-full-name" placeholder="ПІБ">
+                <input id="doctor-email" placeholder="Email">
+                <input id="doctor-password" type="password" placeholder="Пароль">
+
+                <select id="doctor-specialization">
+                    <option value="Терапевт">Терапевт</option>
+                    <option value="Педіатр">Педіатр</option>
+                    <option value="Сімейний лікар">Сімейний лікар</option>
+                </select>
+
+                <select id="doctor-hospital"></select>
+
+                <input id="doctor-experience" type="number" placeholder="Стаж роботи">
+                <input id="doctor-qualification" placeholder="Кваліфікація">
+                <textarea id="doctor-bio" placeholder="Короткий опис лікаря"></textarea>
+
+                <button onclick="registerDoctor()">Зареєструвати лікаря</button>
+            </div>
+
+            <div id="current-user-box" class="current-user-box"></div>
+
+            <div class="auth-helper">
+                <b>Підказка:</b> пацієнт після входу потрапляє у власний кабінет, а лікар — у кабінет лікаря із записами пацієнтів.
+            </div>
+        </div>
+
+        <div class="card auth-page-banner">
+            <h3>🩺 Як працює MedFlow?</h3>
+            <p class="muted">
+                Пацієнт реєструється, описує симптоми, обирає лікаря первинної ланки та записується на прийом.
+                Лікар бачить запис у своєму кабінеті.
+            </p>
+        </div>
+    </main>
+</div>
+
+<script>
+    let currentUser = null;
+
+    function showAuthTab(tab) {
+        document.getElementById('login-tab').style.display = 'none';
+        document.getElementById('patient-tab').style.display = 'none';
+        document.getElementById('doctor-tab').style.display = 'none';
+        document.getElementById(`${tab}-tab`).style.display = 'flex';
+    }
+
+    async function loadHospitals() {
+        const response = await fetch('/hospitals');
+
+        if (!response.ok) {
+            return;
+        }
+
+        const hospitals = await response.json();
+        const select = document.getElementById('doctor-hospital');
+
+        select.innerHTML = '';
+
+        hospitals.forEach(hospital => {
+            select.innerHTML += `<option value="${hospital.id}">${hospital.name}</option>`;
+        });
+    }
+
+    function redirectByRole(user) {
+        if (user.role === 'patient') {
+            window.location.href = '/patient';
+            return;
+        }
+
+        if (user.role === 'doctor') {
+            window.location.href = '/doctor';
+            return;
+        }
+    }
+
+    async function registerPatient() {
+        const payload = {
+            full_name: document.getElementById('patient-full-name').value,
+            email: document.getElementById('patient-email').value,
+            password: document.getElementById('patient-password').value,
+            age: parseInt(document.getElementById('patient-age').value),
+            phone: document.getElementById('patient-phone-register').value
+        };
+
+        const response = await fetch('/register/patient', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            alert('Помилка реєстрації пацієнта');
+            return;
+        }
+
+        currentUser = await response.json();
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        redirectByRole(currentUser);
+    }
+
+    async function registerDoctor() {
+        const payload = {
+            full_name: document.getElementById('doctor-full-name').value,
+            email: document.getElementById('doctor-email').value,
+            password: document.getElementById('doctor-password').value,
+            specialization: document.getElementById('doctor-specialization').value,
+            hospital_id: parseInt(document.getElementById('doctor-hospital').value),
+            experience: parseInt(document.getElementById('doctor-experience').value),
+            qualification: document.getElementById('doctor-qualification').value,
+            bio: document.getElementById('doctor-bio').value
+        };
+
+        const response = await fetch('/register/doctor', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            alert('Помилка реєстрації лікаря');
+            return;
+        }
+
+        currentUser = await response.json();
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        redirectByRole(currentUser);
+    }
+
+    async function loginUser() {
+        const payload = {
+            email: document.getElementById('login-email').value,
+            password: document.getElementById('login-password').value
+        };
+
+        const response = await fetch('/login', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            alert('Невірний email або пароль');
+            return;
+        }
+
+        currentUser = await response.json();
+        localStorage.setItem('currentUser', JSON.stringify(currentUser));
+        redirectByRole(currentUser);
+    }
+
+    window.onload = async function () {
+        await loadHospitals();
+
+        const savedUser = localStorage.getItem('currentUser');
+
+        if (!savedUser) {
+            return;
+        }
+
+        currentUser = JSON.parse(savedUser);
+
+        const params = new URLSearchParams(window.location.search);
+        const isBookingMode = params.get('booking') === 'true';
+
+        if (isBookingMode && currentUser.role === 'patient') {
+            window.location.href = '/family-doctor';
+            return;
+        }
+
+        redirectByRole(currentUser);
+    };
+</script>
+</body>
+</html>

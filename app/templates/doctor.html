@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>MedFlow — Кабінет лікаря</title>
+    <link rel="stylesheet" href="/static/style.css?v=15">
+</head>
+<body>
+<div class="container profile-container">
+    <header>
+        <h1><a href="/" class="logo-link">MedFlow</a></h1>
+        <p>Особистий кабінет лікаря</p>
+    </header>
+
+    <main>
+        <div class="card profile-card">
+            <div class="profile-layout">
+                <div class="profile-left">
+                    <div class="photo-frame">
+                        <span id="doctor-photo-placeholder">👨‍⚕️</span>
+                        <img id="doctor-photo" style="display:none;">
+                    </div>
+
+                    <label class="photo-upload">
+                        Додати фото
+                        <input type="file" accept="image/*" onchange="previewDoctorPhoto(event)">
+                    </label>
+
+                    <h2 id="doctor-name-card"></h2>
+                    <p class="profile-role" id="doctor-specialization-card"></p>
+
+                    <button class="submit-btn" onclick="logout()">Вийти</button>
+                </div>
+
+                <div class="profile-right">
+                    <h2>Профіль лікаря</h2>
+                    <div id="doctor-profile-box"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Записи пацієнтів</h2>
+            <p class="muted">
+                Тут лікар бачить пацієнтів, їхні симптоми, час прийому, ICPC-2 класифікацію та може додати рекомендацію.
+            </p>
+            <div id="doctor-bookings-box"></div>
+        </div>
+
+        <div class="card patient-bottom-banner">
+            <h3>Клінічна довідка</h3>
+            <p class="muted">
+                ICPC-2 використовується як допоміжна класифікація скарг пацієнта. Остаточне рішення приймає лікар.
+            </p>
+        </div>
+    </main>
+</div>
+
+<script>
+    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
+    let currentDoctorProfile = null;
+    let icpcByBookingId = {};
+
+    if (!currentUser || currentUser.role !== 'doctor') {
+        window.location.href = '/app';
+    }
+
+    const icpcSections = {
+        A: {name: 'Загальні та неспецифічні симптоми'},
+        D: {name: 'Травна система'},
+        H: {name: 'Вухо'},
+        K: {name: 'Серцево-судинна система'},
+        N: {name: 'Нервова система'},
+        R: {name: 'Дихальна система'},
+        S: {name: 'Шкіра'},
+        U: {name: 'Сечовидільна система'}
+    };
+
+    const icpcCodes = {
+        A: [
+            {code: 'A03', title: 'Лихоманка', keywords: ['температура', 'температур', 'жар', 'лихоманка']},
+            {code: 'A04', title: 'Слабкість / втома', keywords: ['слабкість', 'втома', 'нездужання']},
+            {code: 'A29', title: 'Інші загальні симптоми', keywords: ['ломота', 'погане самопочуття']}
+        ],
+        D: [
+            {code: 'D01', title: 'Біль у животі', keywords: ['живіт', 'болить живіт', 'біль у животі']},
+            {code: 'D09', title: 'Нудота', keywords: ['нудота', 'нудить']},
+            {code: 'D11', title: 'Діарея', keywords: ['діарея', 'пронос']},
+            {code: 'D03', title: 'Печія', keywords: ['печія']}
+        ],
+        H: [
+            {code: 'H01', title: 'Біль у вусі', keywords: ['болить вухо', 'біль у вусі', 'вухо']},
+            {code: 'H71', title: 'Гострий середній отит', keywords: ['отит', 'запалення вуха']},
+            {code: 'H84', title: 'Порушення слуху', keywords: ['погано чую', 'втрата слуху', 'слух']}
+        ],
+        K: [
+            {code: 'K01', title: 'Біль у серці', keywords: ['серце', 'болить серце', 'біль у серці', 'груди', 'грудях']},
+            {code: 'K04', title: 'Серцебиття', keywords: ['пульс', 'серцебиття']},
+            {code: 'K85', title: 'Підвищений артеріальний тиск', keywords: ['тиск', 'високий тиск']}
+        ],
+        N: [
+            {code: 'N01', title: 'Головний біль', keywords: ['голова', 'головний біль', 'мігрень']},
+            {code: 'N17', title: 'Запаморочення', keywords: ['запаморочення', 'крутиться голова']}
+        ],
+        R: [
+            {code: 'R05', title: 'Кашель', keywords: ['кашель']},
+            {code: 'R21', title: 'Симптоми горла', keywords: ['горло', 'болить горло']},
+            {code: 'R74', title: 'Гостра інфекція верхніх дихальних шляхів', keywords: ['нежить', 'грип', 'застуда']}
+        ],
+        S: [
+            {code: 'S06', title: 'Висип', keywords: ['висип']},
+            {code: 'S02', title: 'Свербіж шкіри', keywords: ['свербіж', 'чухається']},
+            {code: 'S07', title: 'Почервоніння шкіри', keywords: ['почервоніння', 'червона шкіра']}
+        ],
+        U: [
+            {code: 'U01', title: 'Біль при сечовипусканні', keywords: ['болить при сечовипусканні', 'сечовипускання']},
+            {code: 'U14', title: 'Симптоми нирок', keywords: ['нирки', 'болять нирки']}
+        ]
+    };
+
+    const clinicalReferences = {
+        K01: {
+            title: 'Біль у серці',
+            focus: [
+                'уточнити локалізацію та характер болю',
+                'запитати про задишку, слабкість, серцебиття',
+                'оцінити артеріальний тиск та пульс',
+                'звернути увагу на біль у грудях при фізичному навантаженні'
+            ],
+            warning: 'Сильний біль у грудях, задишка або різке погіршення стану потребують невідкладної оцінки лікаря.'
+        },
+        H01: {
+            title: 'Біль у вусі',
+            focus: [
+                'уточнити тривалість болю',
+                'перевірити наявність температури',
+                'запитати про виділення з вуха',
+                'оцінити зниження слуху або закладеність'
+            ],
+            warning: 'Сильний біль, висока температура або виділення з вуха потребують очного огляду.'
+        },
+        D01: {
+            title: 'Біль у животі',
+            focus: [
+                'уточнити точну локалізацію болю',
+                'запитати про нудоту, блювання, діарею',
+                'оцінити зв’язок болю з їжею',
+                'уточнити температуру та загальний стан'
+            ],
+            warning: 'Гострий або різкий біль у животі потребує термінової оцінки лікаря.'
+        },
+        R05: {
+            title: 'Кашель',
+            focus: [
+                'уточнити тривалість кашлю',
+                'запитати про температуру, нежить, біль у горлі',
+                'оцінити наявність задишки',
+                'уточнити сухий чи вологий кашель'
+            ],
+            warning: 'Задишка, біль у грудях або тривала висока температура потребують очного огляду.'
+        },
+        R21: {
+            title: 'Симптоми горла',
+            focus: [
+                'уточнити біль при ковтанні',
+                'оцінити температуру',
+                'запитати про кашель та нежить',
+                'перевірити тривалість симптомів'
+            ],
+            warning: 'Утруднене дихання або різке погіршення стану потребує невідкладної оцінки.'
+        },
+        A03: {
+            title: 'Лихоманка',
+            focus: [
+                'уточнити максимальну температуру',
+                'запитати про тривалість лихоманки',
+                'оцінити супутні симптоми',
+                'перевірити загальний стан пацієнта'
+            ],
+            warning: 'Тривала або дуже висока температура потребує консультації лікаря.'
+        },
+        N01: {
+            title: 'Головний біль',
+            focus: [
+                'уточнити локалізацію головного болю',
+                'запитати про запаморочення, нудоту, порушення зору',
+                'оцінити тривалість та інтенсивність болю',
+                'уточнити зв’язок із тиском, стресом або навантаженням'
+            ],
+            warning: 'Раптовий сильний головний біль або неврологічні симптоми потребують невідкладної оцінки.'
+        },
+        K85: {
+            title: 'Підвищений артеріальний тиск',
+            focus: [
+                'уточнити показники артеріального тиску',
+                'запитати про головний біль, біль у грудях, задишку',
+                'оцінити пульс та загальний стан',
+                'уточнити наявність хронічних захворювань'
+            ],
+            warning: 'Дуже високий тиск із болем у грудях, задишкою або слабкістю потребує термінової оцінки.'
+        }
+    };
+
+    function detectICPC(symptoms) {
+        const text = String(symptoms || '').toLowerCase();
+        const results = [];
+
+        for (const sectionKey in icpcCodes) {
+            icpcCodes[sectionKey].forEach(item => {
+                if (item.keywords.some(keyword => text.includes(keyword))) {
+                    results.push({
+                        sectionCode: sectionKey,
+                        sectionName: icpcSections[sectionKey].name,
+                        code: item.code,
+                        title: item.title,
+                        confidence: 'висока'
+                    });
+                }
+            });
+        }
+
+        if (!results.length) {
+            results.push({
+                sectionCode: 'A',
+                sectionName: icpcSections.A.name,
+                code: 'A99',
+                title: 'Інші загальні симптоми / скарги',
+                confidence: 'середня'
+            });
+        }
+
+        return results;
+    }
+
+    function renderClinicalReferences(icpcList) {
+        let html = '';
+
+        icpcList.forEach(icpc => {
+            const reference = clinicalReferences[icpc.code];
+
+            if (!reference) {
+                return;
+            }
+
+            html += `
+                <div class="clinical-reference">
+                    <h4>Довідка для лікаря: ${reference.title}</h4>
+                    <p><b>На що звернути увагу:</b></p>
+                    <ul>
+                        ${reference.focus.map(item => `<li>${item}</li>`).join('')}
+                    </ul>
+                    <p class="clinical-warning"><b>Попередження:</b> ${reference.warning}</p>
+                </div>
+            `;
+        });
+
+        if (!html) {
+            return '<p class="muted">Для цього ICPC-2 коду поки немає розширеної довідки.</p>';
+        }
+
+        return html;
+    }
+
+    function previewDoctorPhoto(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+
+        reader.onload = function (e) {
+            const img = document.getElementById('doctor-photo');
+            const placeholder = document.getElementById('doctor-photo-placeholder');
+
+            img.src = e.target.result;
+            img.style.display = 'block';
+            placeholder.style.display = 'none';
+
+            localStorage.setItem(`doctorPhoto_${currentUser.id}`, e.target.result);
+        };
+
+        reader.readAsDataURL(file);
+    }
+
+    function loadDoctorPhoto() {
+        const savedPhoto = localStorage.getItem(`doctorPhoto_${currentUser.id}`);
+        if (!savedPhoto) return;
+
+        const img = document.getElementById('doctor-photo');
+        const placeholder = document.getElementById('doctor-photo-placeholder');
+
+        img.src = savedPhoto;
+        img.style.display = 'block';
+        placeholder.style.display = 'none';
+    }
+
+    async function loadDoctorProfile() {
+        const response = await fetch(`/users/${currentUser.id}/doctor-profile`);
+
+        if (!response.ok) {
+            document.getElementById('doctor-profile-box').innerHTML = '<p class="empty-slots">Профіль лікаря не знайдено.</p>';
+            return;
+        }
+
+        currentDoctorProfile = await response.json();
+
+        document.getElementById('doctor-name-card').innerText = currentDoctorProfile.name;
+        document.getElementById('doctor-specialization-card').innerText = currentDoctorProfile.specialization;
+
+        document.getElementById('doctor-profile-box').innerHTML = `
+            <div class="profile-info">
+                <div class="info-row"><span>ПІБ</span><b>${currentDoctorProfile.name}</b></div>
+                <div class="info-row"><span>Спеціалізація</span><b>${currentDoctorProfile.specialization}</b></div>
+                <div class="info-row"><span>Лікарня</span><b>${currentDoctorProfile.hospital_name}</b></div>
+                <div class="info-row"><span>Стаж</span><b>${currentDoctorProfile.experience} років</b></div>
+                <div class="info-row"><span>Кваліфікація</span><b>${currentDoctorProfile.qualification}</b></div>
+            </div>
+
+            <div class="profile-note">
+                <b>Про лікаря:</b> ${currentDoctorProfile.bio}
+            </div>
+        `;
+
+        await loadDoctorBookings();
+    }
+
+    async function loadDoctorBookings() {
+        const response = await fetch(`/doctors/${currentDoctorProfile.id}/bookings`);
+        const bookings = await response.json();
+
+        renderDoctorBookings(bookings);
+    }
+
+    function renderDoctorBookings(bookings) {
+        const box = document.getElementById('doctor-bookings-box');
+
+        if (!bookings.length) {
+            box.innerHTML = '<p class="empty-slots">Поки немає записів пацієнтів.</p>';
+            return;
+        }
+
+        box.innerHTML = '';
+
+        bookings.forEach(booking => {
+            const icpcList = detectICPC(booking.symptoms);
+            icpcByBookingId[booking.booking_id] = icpcList;
+
+            const savedRecommendation = localStorage.getItem(`recommendation_${booking.booking_id}`);
+            const recommendationBlock = savedRecommendation ? renderSavedRecommendation(JSON.parse(savedRecommendation)) : '';
+
+            box.innerHTML += `
+                <div class="cabinet-booking">
+                    <p><b>Пацієнт:</b> ${booking.patient_name}</p>
+                    <p><b>Вік:</b> ${booking.patient_age}</p>
+                    <p><b>Телефон:</b> ${booking.patient_phone}</p>
+                    <p><b>Час прийому:</b> ${new Date(booking.start_time).toLocaleString('uk-UA')}</p>
+                    <p><b>Симптоми:</b> ${booking.symptoms || 'Не вказано'}</p>
+
+                    <div class="clinical-box">
+                        <h3>ICPC-2 класифікація скарг</h3>
+
+                        ${icpcList.map(icpc => `
+                            <div class="icpc-item">
+                                <p><b>Розділ:</b> ${icpc.sectionCode} — ${icpc.sectionName}</p>
+                                <p><b>Код:</b> ${icpc.code} — ${icpc.title}</p>
+                                <p><b>Рівень збігу:</b> ${icpc.confidence}</p>
+                            </div>
+                        `).join('')}
+
+                        <p><b>Джерело:</b> ICPC-2 / клінічні довідкові матеріали</p>
+                        <p class="muted">Це довідкова класифікація звернення, а не автоматичний діагноз.</p>
+
+                        ${renderClinicalReferences(icpcList)}
+                    </div>
+
+                    ${recommendationBlock}
+
+                    <div class="recommendation-form">
+                        <h3>Рекомендація лікаря</h3>
+                        <textarea id="recommendation-${booking.booking_id}" placeholder="Введіть рекомендацію лікаря..."></textarea>
+                        <textarea id="medicines-${booking.booking_id}" placeholder="Призначені препарати або зауваження..."></textarea>
+                        <button class="submit-btn" onclick="saveRecommendation(${booking.booking_id})">
+                            Зберегти рекомендацію
+                        </button>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    function renderSavedRecommendation(data) {
+        const icpcText = data.icpcList ? data.icpcList.map(x => `${x.code} — ${x.title}`).join(', ') : 'Не вказано';
+
+        return `
+            <div class="saved-recommendation">
+                <h3>Збережена рекомендація</h3>
+                <p><b>Лікар:</b> ${data.doctorName}</p>
+                <p><b>ICPC-2:</b> ${icpcText}</p>
+                <p><b>Рекомендація:</b> ${data.recommendation || 'Не вказано'}</p>
+                <p><b>Призначення:</b> ${data.medicines || 'Не вказано'}</p>
+            </div>
+        `;
+    }
+
+    function saveRecommendation(bookingId) {
+        const recommendation = document.getElementById(`recommendation-${bookingId}`).value;
+        const medicines = document.getElementById(`medicines-${bookingId}`).value;
+        const icpcList = icpcByBookingId[bookingId] || [];
+
+        const data = {
+            bookingId: bookingId,
+            doctorName: currentDoctorProfile.name,
+            icpcList: icpcList,
+            recommendation: recommendation,
+            medicines: medicines,
+            createdAt: new Date().toISOString()
+        };
+
+        localStorage.setItem(`recommendation_${bookingId}`, JSON.stringify(data));
+
+        alert('Рекомендацію збережено');
+        loadDoctorBookings();
+    }
+
+    function logout() {
+        localStorage.removeItem('currentUser');
+        window.location.href = '/app';
+    }
+
+    loadDoctorProfile();
+    loadDoctorPhoto();
+</script>
+</body>
+</html>

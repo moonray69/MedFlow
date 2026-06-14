@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>MedFlow — Кабінет пацієнта</title>
+    <link rel="stylesheet" href="/static/style.css?v=12">
+</head>
+<body>
+<div class="container profile-container">
+    <header>
+        <h1><a href="/" class="logo-link">MedFlow</a></h1>
+        <p>Особистий кабінет пацієнта</p>
+    </header>
+
+    <main>
+        <div class="card profile-card">
+            <div class="profile-layout">
+                <div class="profile-left">
+                    <div class="photo-frame">
+                        <span id="photo-placeholder">👤</span>
+                        <img id="patient-photo" style="display:none;">
+                    </div>
+
+                    <label class="photo-upload">
+                        Додати фото
+                        <input type="file" accept="image/*" onchange="previewPhoto(event)">
+                    </label>
+
+                    <h2 id="profile-name"></h2>
+                    <p class="profile-role">Пацієнт MedFlow</p>
+
+                    <button class="submit-btn" onclick="logout()">Вийти</button>
+                </div>
+
+                <div class="profile-right">
+                    <h2>Мій профіль</h2>
+                    <div id="patient-info" class="profile-info"></div>
+
+                    <div class="family-doctor-box" id="family-doctor-box">
+                        <h3>Сімейний лікар</h3>
+                        <p><b>Статус:</b> не закріплено</p>
+                        <p class="muted">Пацієнт може обрати сімейного лікаря або записатися на первинний прийом.</p>
+                        <a href="/family-doctor" class="family-doctor-btn">Обрати сімейного лікаря</a>
+                    </div>
+
+                    <div class="profile-note">
+                        <b>Примітка:</b> цей кабінет містить основну інформацію про пацієнта, записи до лікарів, рекомендації та історію відвідувань.
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h2>Історія відвідувань</h2>
+            <p class="muted">Тут відображаються медичні заклади та лікарі, до яких пацієнт записувався через систему.</p>
+            <div id="history-box"></div>
+        </div>
+
+        <div class="card">
+            <h2>Мої записи</h2>
+            <div id="bookings-box"></div>
+        </div>
+
+        <div class="card">
+            <h2>Рекомендації лікаря</h2>
+            <div id="recommendations-box"></div>
+        </div>
+
+        <div class="card patient-bottom-banner">
+            <h3>🩺 Потрібна консультація?</h3>
+            <p class="muted">Опишіть свої скарги, оберіть лікаря первинної ланки та запишіться на зручний час.</p>
+            <a href="/family-doctor" class="submit-btn profile-link">Записатися на прийом</a>
+        </div>
+    </main>
+</div>
+
+<script>
+    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
+
+    if (!currentUser || currentUser.role !== 'patient') {
+        window.location.href = '/app';
+    }
+
+    document.getElementById('profile-name').innerText = currentUser.full_name;
+
+    document.getElementById('patient-info').innerHTML = `
+        <div class="info-row"><span>ПІБ</span><b>${currentUser.full_name}</b></div>
+        <div class="info-row"><span>Email</span><b>${currentUser.email}</b></div>
+        <div class="info-row"><span>Вік</span><b>${currentUser.age}</b></div>
+        <div class="info-row"><span>Телефон</span><b>${currentUser.phone}</b></div>
+    `;
+
+    function loadFamilyDoctor() {
+        const savedFamilyDoctor = localStorage.getItem(`familyDoctor_${currentUser.id}`);
+        if (!savedFamilyDoctor) return;
+
+        const familyDoctor = JSON.parse(savedFamilyDoctor);
+
+        document.getElementById('family-doctor-box').innerHTML = `
+            <h3>Сімейний лікар</h3>
+            <p><b>Статус:</b> закріплено</p>
+            <p><b>Лікар:</b> ${familyDoctor.name}</p>
+            <p><b>Спеціалізація:</b> ${familyDoctor.specialization}</p>
+            <p class="muted">Цей лікар обраний як сімейний лікар пацієнта.</p>
+            <a href="/family-doctor" class="family-doctor-btn">Змінити сімейного лікаря</a>
+        `;
+    }
+
+    function previewPhoto(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        const reader = new FileReader();
+
+        reader.onload = function (e) {
+            const img = document.getElementById('patient-photo');
+            const placeholder = document.getElementById('photo-placeholder');
+
+            img.src = e.target.result;
+            img.style.display = 'block';
+            placeholder.style.display = 'none';
+
+            localStorage.setItem(`patientPhoto_${currentUser.id}`, e.target.result);
+        };
+
+        reader.readAsDataURL(file);
+    }
+
+    function loadSavedPhoto() {
+        const savedPhoto = localStorage.getItem(`patientPhoto_${currentUser.id}`);
+        if (!savedPhoto) return;
+
+        const img = document.getElementById('patient-photo');
+        const placeholder = document.getElementById('photo-placeholder');
+
+        img.src = savedPhoto;
+        img.style.display = 'block';
+        placeholder.style.display = 'none';
+    }
+
+    async function loadBookings() {
+        const response = await fetch(`/patients/${currentUser.id}/bookings`);
+        const bookings = await response.json();
+
+        renderBookings(bookings);
+        renderHistory(bookings);
+        renderRecommendations(bookings);
+    }
+
+    function renderBookings(bookings) {
+        const box = document.getElementById('bookings-box');
+
+        if (!bookings.length) {
+            box.innerHTML = '<p class="empty-slots">У вас поки немає записів.</p>';
+            return;
+        }
+
+        box.innerHTML = '';
+
+        bookings.forEach(b => {
+            box.innerHTML += `
+                <div class="cabinet-booking">
+                    <p><b>Час прийому:</b> ${new Date(b.start_time).toLocaleString('uk-UA')}</p>
+                    <p><b>Пацієнт:</b> ${b.patient_name}</p>
+                    <p><b>Вік:</b> ${b.patient_age}</p>
+                    <p><b>Телефон:</b> ${b.patient_phone}</p>
+                    <p><b>Симптоми:</b> ${b.symptoms || 'Не вказано'}</p>
+                    <p><b>Статус:</b> Очікує прийому</p>
+                </div>
+            `;
+        });
+    }
+
+    function renderHistory(bookings) {
+        const box = document.getElementById('history-box');
+
+        if (!bookings.length) {
+            box.innerHTML = '<p class="empty-slots">Історія відвідувань поки порожня.</p>';
+            return;
+        }
+
+        box.innerHTML = '';
+
+        bookings.forEach((b, index) => {
+            box.innerHTML += `
+                <div class="history-item">
+                    <div class="history-number">${index + 1}</div>
+                    <div>
+                        <p><b>Дата:</b> ${new Date(b.start_time).toLocaleDateString('uk-UA')}</p>
+                        <p><b>Причина звернення:</b> ${b.symptoms || 'Не вказано'}</p>
+                        <p><b>Медичний заклад:</b> Дані будуть додані після розширення історії записів</p>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    function renderRecommendations(bookings) {
+        const box = document.getElementById('recommendations-box');
+        let html = '';
+
+        bookings.forEach(b => {
+            const savedRecommendation = localStorage.getItem(`recommendation_${b.booking_id}`);
+
+            if (savedRecommendation) {
+                const data = JSON.parse(savedRecommendation);
+
+                html += `
+                    <div class="saved-recommendation">
+                        <h3>Рекомендація від лікаря</h3>
+                        <p><b>Лікар:</b> ${data.doctorName}</p>
+                        <p><b>ICPC-2:</b> ${data.icpcCode} — ${data.icpcTitle}</p>
+                        <p><b>Рекомендація:</b> ${data.recommendation || 'Не вказано'}</p>
+                        <p><b>Призначення:</b> ${data.medicines || 'Не вказано'}</p>
+                        <p><b>Дата:</b> ${new Date(data.createdAt).toLocaleString('uk-UA')}</p>
+                    </div>
+                `;
+            }
+        });
+
+        if (!html) {
+            box.innerHTML = '<p class="empty-slots">Поки лікар не залишив рекомендацій.</p>';
+            return;
+        }
+
+        box.innerHTML = html;
+    }
+
+    function logout() {
+        localStorage.removeItem('currentUser');
+        window.location.href = '/app';
+    }
+
+    loadFamilyDoctor();
+    loadSavedPhoto();
+    loadBookings();
+</script>
+</body>
+</html>

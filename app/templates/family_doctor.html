@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <title>MedFlow — Вибір сімейного лікаря</title>
+    <link rel="stylesheet" href="/static/style.css?v=16">
+</head>
+<body>
+<div class="container profile-container">
+    <header>
+        <h1><a href="/" class="logo-link">MedFlow</a></h1>
+        <p>Вибір сімейного лікаря або запис на первинний прийом</p>
+    </header>
+
+    <main>
+        <div class="card patient-bottom-banner">
+            <h3>👨‍⚕️ Оберіть лікаря первинної ланки</h3>
+            <p class="muted">Якщо у вас вже є сімейний лікар — система покаже його першим. Якщо ні — можна обрати терапевта або сімейного лікаря.</p>
+        </div>
+
+        <div class="card" id="current-family-doctor-card" style="display:none;">
+            <h2>Ваш сімейний лікар</h2>
+            <div id="current-family-doctor-box"></div>
+        </div>
+
+        <div class="card">
+            <h2>Доступні лікарі</h2>
+            <div id="family-doctors-list" class="doctors-list"></div>
+        </div>
+
+        <div class="card" id="booking-card" style="display:none;">
+            <h2 id="booking-doctor-title">Запис до лікаря</h2>
+            <p class="muted" id="booking-doctor-subtitle"></p>
+
+            <h3>Оберіть час</h3>
+            <div id="slots-container" class="slots-grid"></div>
+
+            <form id="booking-form" class="booking-form" style="display:none;">
+                <input type="hidden" id="selected-slot-id">
+
+                <div class="form-group">
+                    <label>ПІБ пацієнта</label>
+                    <input id="patient-name" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Вік</label>
+                    <input id="patient-age" type="number" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Телефон</label>
+                    <input id="patient-phone" required>
+                </div>
+
+                <div class="form-group">
+                    <label>Симптоми</label>
+                    <textarea id="patient-symptoms" rows="3" placeholder="Опишіть, що вас турбує..."></textarea>
+                </div>
+
+                <button type="submit" class="submit-btn">Підтвердити запис</button>
+            </form>
+
+            <div id="alert" class="alert"></div>
+        </div>
+
+        <div class="card">
+            <a href="/patient" class="submit-btn profile-link">Повернутися в кабінет</a>
+        </div>
+    </main>
+</div>
+
+<script>
+    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
+    let selectedSlotId = null;
+    let doctorsCache = [];
+
+    if (!currentUser || currentUser.role !== 'patient') {
+        window.location.href = '/app';
+    }
+
+    function getSavedFamilyDoctor() {
+        const saved = localStorage.getItem(`familyDoctor_${currentUser.id}`);
+        return saved ? JSON.parse(saved) : null;
+    }
+
+    function renderCurrentFamilyDoctor() {
+        const savedDoctor = getSavedFamilyDoctor();
+        if (!savedDoctor || !savedDoctor.id) return;
+
+        document.getElementById('current-family-doctor-card').style.display = 'block';
+        document.getElementById('current-family-doctor-box').innerHTML = `
+            <div class="doctor-card active-doctor">
+                <h3>${savedDoctor.name}</h3>
+                <div class="doctor-specialization">${savedDoctor.specialization}</div>
+                <div class="doctor-hospital">${savedDoctor.hospital_name || 'Медичний заклад не вказано'}</div>
+                <div class="doctor-meta">
+                    <span>Сімейний лікар закріплений</span>
+                    <span>Стаж: ${savedDoctor.experience || 0} років</span>
+                    <span>${savedDoctor.qualification || 'Кваліфікація не вказана'}</span>
+                </div>
+                <div class="family-actions">
+                    <button class="submit-btn" onclick="startBookingById(${savedDoctor.id})">Записатися до сімейного лікаря</button>
+                    <button class="family-declaration-btn" onclick="removeFamilyDoctor()">Відкріпити лікаря</button>
+                </div>
+            </div>
+        `;
+    }
+
+    async function loadFamilyDoctors() {
+        const age = Number(currentUser.age) || 18;
+        const response = await fetch(`/doctors?age=${age}`);
+
+        if (!response.ok) {
+            document.getElementById('family-doctors-list').innerHTML = '<p class="empty-slots">Не вдалося завантажити лікарів.</p>';
+            return;
+        }
+
+        const doctors = await response.json();
+        doctorsCache = doctors.filter(d => d.specialization === 'Терапевт' || d.specialization === 'Сімейний лікар');
+
+        repairOldFamilyDoctor();
+        renderCurrentFamilyDoctor();
+        renderDoctors(doctorsCache);
+    }
+
+    function repairOldFamilyDoctor() {
+        const savedDoctor = getSavedFamilyDoctor();
+        if (!savedDoctor || savedDoctor.id) return;
+
+        const foundDoctor = doctorsCache.find(d => d.name === savedDoctor.name);
+        if (foundDoctor) {
+            localStorage.setItem(`familyDoctor_${currentUser.id}`, JSON.stringify(foundDoctor));
+        }
+    }
+
+    function renderDoctors(doctors) {
+        const box = document.getElementById('family-doctors-list');
+
+        if (!doctors.length) {
+            box.innerHTML = '<p class="empty-slots">Немає доступних лікарів.</p>';
+            return;
+        }
+
+        box.innerHTML = '';
+
+        doctors.forEach(doctor => {
+            box.innerHTML += `
+                <div class="doctor-card">
+                    <div class="doctor-card-top">
+                        <div>
+                            <h3>${doctor.name}</h3>
+                            <div class="doctor-specialization">${doctor.specialization}</div>
+                            <div class="doctor-hospital">${doctor.hospital_name || 'Медичний заклад не вказано'}</div>
+                        </div>
+                    </div>
+
+                    <div class="doctor-meta">
+                        <span>Стаж: ${doctor.experience} років</span>
+                        <span>${doctor.qualification}</span>
+                    </div>
+
+                    <div class="doctor-extra family-doctor-extra">
+                        <p>${doctor.bio || 'Опис лікаря не вказано'}</p>
+
+                        <div class="family-actions">
+                            <button class="submit-btn" onclick="startBookingById(${doctor.id})">Записатися на прийом</button>
+                            <button class="family-declaration-btn" onclick="chooseFamilyDoctorById(${doctor.id})">Укласти декларацію</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        });
+    }
+
+    function findDoctorById(doctorId) {
+        return doctorsCache.find(d => Number(d.id) === Number(doctorId));
+    }
+
+    function chooseFamilyDoctorById(doctorId) {
+        const doctor = findDoctorById(doctorId);
+        if (!doctor) {
+            alert('Лікаря не знайдено');
+            return;
+        }
+
+        localStorage.setItem(`familyDoctor_${currentUser.id}`, JSON.stringify(doctor));
+        alert(`Сімейного лікаря обрано: ${doctor.name}`);
+        window.location.reload();
+    }
+
+    function removeFamilyDoctor() {
+        localStorage.removeItem(`familyDoctor_${currentUser.id}`);
+        alert('Сімейного лікаря відкріплено');
+        window.location.reload();
+    }
+
+    async function startBookingById(doctorId) {
+        const doctor = findDoctorById(doctorId) || getSavedFamilyDoctor();
+
+        if (!doctor || !doctor.id) {
+            showAlert('Не вдалося визначити лікаря для запису', 'error');
+            return;
+        }
+
+        selectedSlotId = null;
+
+        document.getElementById('booking-card').style.display = 'block';
+        document.getElementById('booking-doctor-title').innerText = `Запис до лікаря: ${doctor.name}`;
+        document.getElementById('booking-doctor-subtitle').innerText = doctor.specialization;
+
+        document.getElementById('patient-name').value = currentUser.full_name || '';
+        document.getElementById('patient-age').value = currentUser.age || '';
+        document.getElementById('patient-phone').value = currentUser.phone || '';
+
+        await loadDoctorSlots(Number(doctor.id));
+
+        document.getElementById('booking-card').scrollIntoView({behavior: 'smooth'});
+    }
+
+    async function loadDoctorSlots(doctorId) {
+        const container = document.getElementById('slots-container');
+        container.innerHTML = '<p class="empty-slots">Завантаження слотів...</p>';
+        document.getElementById('booking-form').style.display = 'none';
+
+        const response = await fetch(`/doctors/${doctorId}/slots`);
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Помилка слотів:', response.status, errorText);
+            showAlert(`Не вдалося завантажити слоти лікаря. Код: ${response.status}`, 'error');
+            container.innerHTML = '';
+            return;
+        }
+
+        const slots = await response.json();
+        container.innerHTML = '';
+
+        if (!slots.length) {
+            container.innerHTML = '<p class="empty-slots">Вільних слотів немає.</p>';
+            return;
+        }
+
+        slots.forEach(slot => {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'slot-btn';
+
+            const date = new Date(slot.start_time);
+
+            button.innerText = date.toLocaleString('uk-UA', {
+                day: '2-digit',
+                month: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit'
+            });
+
+            if (slot.is_booked) {
+                button.classList.add('booked');
+                button.disabled = true;
+            } else {
+                button.onclick = function () {
+                    selectSlot(slot.id, button);
+                };
+            }
+
+            container.appendChild(button);
+        });
+    }
+
+    function selectSlot(slotId, button) {
+        selectedSlotId = slotId;
+        document.getElementById('selected-slot-id').value = slotId;
+
+        document.querySelectorAll('.slot-btn').forEach(btn => btn.classList.remove('selected'));
+
+        button.classList.add('selected');
+        document.getElementById('booking-form').style.display = 'flex';
+    }
+
+    document.getElementById('booking-form').onsubmit = async function (event) {
+        event.preventDefault();
+
+        if (!selectedSlotId) {
+            showAlert('Спочатку оберіть час прийому', 'error');
+            return;
+        }
+
+        const payload = {
+            slot_id: Number(selectedSlotId),
+            patient_id: currentUser.id,
+            patient_name: document.getElementById('patient-name').value,
+            patient_age: Number(document.getElementById('patient-age').value),
+            patient_phone: document.getElementById('patient-phone').value,
+            symptoms: document.getElementById('patient-symptoms').value
+        };
+
+        const response = await fetch('/bookings', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            showAlert(error.detail || 'Помилка запису', 'error');
+            return;
+        }
+
+        showAlert('Запис успішно створено. Лікар побачить його у своєму кабінеті.', 'success');
+
+        setTimeout(() => {
+            window.location.href = '/patient';
+        }, 1200);
+    };
+
+    function showAlert(message, type) {
+        const alertBox = document.getElementById('alert');
+        alertBox.innerText = message;
+        alertBox.className = `alert alert-${type}`;
+        alertBox.style.display = 'block';
+    }
+
+    loadFamilyDoctors();
+</script>
+</body>
+</html>
